@@ -1,0 +1,620 @@
+PROGRAM Login
+
+FROM validations IMPORT
+IMPORT datetime
+
+
+DEFINE FUNCTION get_user()
+
+	OPEN "userCredentials.txt" AS readFile IN READ MODE
+		FOR each index, data IN ENUMERATE(readFile, 1)
+			username, password, userType= REMOVE LEADING AND TRAILING BLANKS FROM data WITH '\n'.SPLIT WITH ', '
+			YIELD username, password, userType
+		ENDFOR
+	CLOSE readFile
+
+ENDFUNCTION
+
+DEFINE FUNCTION signUpSuperAdmin()
+
+	DECLARE name, password AS STRING
+
+	PRINT('Enter Name:')
+	GET name
+	PRINT('Enter password: ')
+	GET password
+
+	OPEN "userCredentials.txt" AS writeFile IN APPEND MODE
+		WRITE name PLUS ', ' PLUS password PLUS ', s\n') TO writeFile
+	CLOSE writeFile
+
+ENDFUNCTION
+
+DEFINE FUNCTION signUpAdmin()
+
+	DECLARE name, password AS STRING
+
+	PRINT('Enter Name:')
+	GET name
+	PRINT('Enter password: ')
+	GET password
+
+	OPEN "userCredentials.txt" AS writeFile IN APPEND MODE
+		WRITE name PLUS ', ' PLUS password PLUS ', a\n') TO writeFile
+	CLOSE writeFile
+
+ENDFUNCTION
+
+DEFINE FUNCTION user_exists(username, password)
+
+	RETURN CALL FUNCTION any(user IS EQUALS TO (username,password, 's') OR user IS EQUALS TO (username, password, 'a') FOR user IN CALL FUNCTION get_user())
+
+ENDFUNCTION
+
+DEFINE FUNCTION loginUserType(username, password)
+
+	DECLARE superAdminFlag AS 's'
+	DECLARE adminFlag AS 'a'
+
+	FOR each user IN CALL FUNCTION get_user()
+		IF (username, password, 's') IS EQUALS TO user THEN
+			PRINT('Welcome Back, Super Admin ' PLUS username)
+            RETURN superAdminFlag
+		ELSEIF (username, password, 'a') IS EQUALS TO user THEN
+			PRINT('Welcome Back, Admin ' PLUS username)
+            RETURN adminFlag
+		ENDIF
+	ENDFOR
+
+ENDFUNCTION
+
+DEFINE FUNCTION login()
+
+	DECLARE username, password, currentDT AS STRING
+
+	DO WHILE TRUE
+		PRINT('Enter Your Username: ')
+		GET username
+		PRINT('Enter Your Password: ')
+		GET password
+		IF NOT CALL FUNCTION user_exists(username, password) THEN
+			PRINT('INVALID USERNAME OR PASSWORD')
+			CONTINUE
+		ELSE THEN
+			SET currentDT TO CURRENT DATE
+			CONVERT currentDT INTO STRING AS date USING FORMAT ("year-month-day hour:minute:second")
+			CALL FUNCTION writeAuditLog('[' + currentDT + '] ' + username + " Logged In ")
+			RETURN username, password
+		ENDIF
+
+ENDFUNCTION
+
+DEFINE FUNCTION loginPeriod()
+
+	SET currentDT TO CURRENT DATE
+		IF currentDT hour IS MORE THAN OR EQUALS TO 21 OR currentDT hour IS LESS THAN 8 THEN
+			PRINT('Working Hour is over, Please Login At 8am.')
+			RETURN FALSE
+		
+		RETURN TRUE
+		ENDIF
+ENDFUNCTION
+
+
+
+PROGRAM Main
+
+FROM options IMPORT
+FROM login IMPORT
+
+
+DEFINE FUNCTION starting_program()
+
+	DECLARE choices, choice, flag AS STRING
+	DECLARE choice AS ARRAY
+
+	DO WHILE TRUE
+		PRINT("\n" PLUS '=' MULTIPLY 30)
+		PRINT('1. LOG IN\n'
+			  '2. Exit Program')
+		CONVERT choices INTO INTEGER
+		IF choices IS SUCCESSFUL THEN
+			PRINT('Do you want to Log In or Exit?: ')
+			GET choices
+			IF choices IS EQUALS TO 1 THEN
+				username,password=CALL FUNCTION login()
+				flag= CALL FUNCTION loginUserType(username, password)
+				IF flag IS EQUALS TO 's' THEN
+					CALL FUNCTION super_admin_menu()
+					RETURN TRUE
+				ELSEIF FLAG IS EQUALS TO 'a' THEN
+					CALL FUNCTION admin_menu()
+					RETURN TRUE
+				ENDIF
+			ELSEIF choices IS EQUALS TO 2 THEN
+				PRINT('Do you want to exit the system?[y/n]: ')
+				GET choice
+				IF choice IN ['Y', 'y'] THEN
+					CALL FUNCTION writeAuditLog('=' MULTIPLY 15 PLUS ' Exited Program ' PLUS '=' MULTIPLY 15)
+					CALL FUNCTION quit()
+				ELSEIF choice IN ['N', 'n'] THEN
+					RETURN CALL FUNCTION starting_program()
+				ENDIF
+			ENDIF
+		ELSE THEN
+			PRINT('Enter only numbers..')
+			RETURN CALL FUNCTION starting_program()
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION super_admin_menu()
+
+	DECLARE choice, menu_list, index AS STRING
+	DECLARE supAdmin_menu_list AS ARRAY
+
+	PRINT('=' MULTIPLY 15 PLUS ' Welcome To Super Admin Main Menu ' PLUS '=' MULTIPLY 15)
+		supAdmin_menu_list=[
+        ("Insert New Data", CALL FUNCTION insertMenu),
+        ("View Data", CALL FUNCTION viewMenu),
+        ("Modify Existing Data", CALL FUNCTION modifyMenu),
+        ("Delete Data", CALL FUNCTION deleteMenu),
+		("Create New Super Admin", CALL FUNCTION signUpSuperAdmin),
+		("Create New Admin", CALL FUNCTION signUpAdmin),
+		("View Audit Log", CALL FUNCTION viewAuditLog),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(supAdmin_menu_list)
+		PRINT('What would you like to do? : ')
+		GET choice
+		choice= CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION super_admin_menu)
+		choice -= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION admin_menu()
+
+	DECLARE choice, menu_list, index AS STRING
+	DECLARE admin_menu_list AS ARRAY
+
+	PRINT('=' MULTIPLY 15 PLUS ' Welcome To Admin Main Menu ' PLUS '=' MULTIPLY 15)
+		admin_menu_list=[
+        ("Insert New Data", CALL FUNCTION insertMenu),
+        ("View Data", CALL FUNCTION viewMenu),
+        ("Modify Existing Data", CALL FUNCTION modifyMenu),
+        ("Delete Data", CALL FUNCTION deleteMenu),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(admin_menu_list)
+		PRINT('What would you like to do? Choose a number: ')
+		GET choice
+		choice= CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION admin_menu)
+		choice -= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION insertMenu()
+
+	DECLARE insert_menu_list, choice AS ARRAY
+	DECLARE choice, menu_list, index AS STRING
+
+	insert_menu_list= [
+        ("Insert Tenant's details", CALL FUNCTION writeTenant),
+        ("Insert Apartment Data", CALL FUNCTION writeApartment),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(insert_menu_list)
+		PRINT('What would you like to Insert? Enter [X] to previous menu: ')
+		GET choice
+		IF choice IN ['X', 'x'] THEN
+			RETURN FALSE
+		choice = CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION insertMenu)
+		choice-= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION viewMenu()
+
+	DECLARE view_menu_list, choice AS ARRAY
+	DECLARE choice, menu_list, index AS STRING
+	PRINT('=' MULTIPLY 15 PLUS ' Welcome To View Main Menu ' PLUS '=' MULTIPLY 15)
+
+	view_menu_list = [
+        ("View Tenant Record", CALL FUNCTION view_searchCurrentTenantMenu),
+        ("View Apartment Record", CALL FUNCTION viewAndSearchApartmentMenu),
+        ("View Past Tenant Record", CALL FUNCTION viewAndSearchPastTenantMenu),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(view_menu_list)
+		PRINT('What would you like to View? Enter [X] to previous menu: ')
+		GET choice
+		IF choice IN ['X', 'x'] THEN
+			RETURN FALSE
+		choice = CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION viewMenu)
+		choice-= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION view_searchCurrentTenantMenu()
+
+	DECLARE viewTenantList, choice AS ARRAY
+	DECLARE choice, menu_list, index AS STRING
+	PRINT('=' MULTIPLY 15 PLUS ' Welcome To View and Search Menu ' PLUS '=' MULTIPLY 15)
+
+	viewTenantList = [
+        ("View All Current Tenant", CALL FUNCTION viewAllTenant),
+        ("Search Tenant", CALL FUNCTION searchTenant),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(viewTenantList)
+		PRINT('Choose your Action. Enter [X] to previous menu : ')
+		GET choice
+		IF choice IN ['X', 'x'] THEN
+			RETURN FALSE
+		choice = CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION view_searchCurrentTenantMenu)
+		choice-= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+		choice+= 1
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION viewAndSearchApartmentMenu()
+
+	DECLARE viewApList, choice AS ARRAY
+	DECLARE choice, menu_list, index AS STRING
+
+	viewApList = [
+        ("View All Apartment", CALL FUNCTION viewAllApartment),
+        ("Search Apartment", CALL FUNCTION searchApartment),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(viewApList)
+		PRINT('Choose your Action. Enter [X] to previous menu : ')
+		GET choice
+		IF choice IN ['X', 'x'] THEN
+			RETURN FALSE
+		choice = CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION viewAndSearchApartmentMenu)
+		choice-= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+		choice+= 1
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION viewAndSearchPastTenantMenu()
+
+	DECLARE viewPastTenList, choice AS ARRAY
+	DECLARE choice, menu_list, index AS STRING
+
+	viewPastTenList = [
+        ("View All Past Tenant", CALL FUNCTION viewPastTenant),
+        ("Search Past Tenant", CALL FUNCTION searchPastTenant),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(viewPastTenList)
+		PRINT('Choose your Action. Enter [X] to previous menu : ')
+		GET choice
+		IF choice IN ['X', 'x'] THEN
+			RETURN FALSE
+		choice = CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION viewAndSearchPastTenantMenu)
+		choice-= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+		choice+= 1
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION modifyMenu()
+
+	DECLARE modify_menu_list, choice AS ARRAY
+	DECLARE choice, menu_list, index AS STRING
+
+	modify_menu_list = [
+        ("Modify Tenant Record", CALL FUNCTION modifyTenant),
+        ("Modify Apartment Record", CALL FUNCTION modifyApartment),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(modify_menu_list)
+		PRINT('What would you like to Modify? Enter [X] to previous menu: ')
+		GET choice
+		IF choice IN ['X', 'x'] THEN
+			RETURN FALSE
+		choice = CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION modifyMenu)
+		choice-= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION deleteMenu()
+
+	DECLARE delete_menu_list, choice AS ARRAY
+	DECLARE choice, menu_list, index AS STRING
+
+	delete_menu_list = [
+        ("Delete Tenant Record", CALL FUNCTION deleteTenant),
+        ("Log Out", CALL FUNCTION logOut)
+    ]
+	DO WHILE TRUE
+		menu_list, index = CALL FUNCTION printMenu(delete_menu_list)
+		PRINT('Choose your Action. Enter [X] to previous menu : ')
+		GET choice
+		IF choice IN ['X', 'x'] THEN
+			RETURN FALSE
+		choice = CALL FUNCTION menu_choiceValidate(choice, index, CALL FUNCTION deleteMenu)
+		choice-= 1
+		CALL FUNCTION runFunc(menu_list, choice)
+		choice+= 1
+		ENDIF
+	ENDWHILE
+
+ENDFUNCTION
+
+DEFINE FUNCTION backtoPrev()
+
+	RETURN FALSE
+
+ENDFUNCTION
+
+DEFINE FUNCTION get_menus(menu_list)
+
+	FOR each index, menu IN ENUMERATE(menu_list, 1)
+		menus,func= menu
+		YIELD menus, func
+	ENDFOR
+
+ENDFUNCTION
+
+DEFINE FUNCTION runFunc(menu_list, choice)
+
+	DECLARE menu_list AS ARRAY
+
+	FOR each menus, func IN CALL FUNCTION get_menus(menu_list)
+		IF menu_list[choice] IS EQUALS TO (menus, func) THEN
+			RETURN func()
+		ENDIF
+	ENDFOR
+
+ENDFUNCTION
+
+DEFINE FUNCTION printMenu(menu_list)
+
+	countIndex=0
+	FOR each index, menu IN ENUMERATE(menu_list, 1)
+		menus,func= menu
+		PRINT(f'{index}. {menus}')
+		countIndex+=1
+	RETURN menu_list, countIndex
+	ENDFOR
+
+ENDFUNCTION
+
+DEFINE FUNCTION logOut()
+
+	CALL FUNCTION writeAuditLog('-' MULTIPLY 15 PLUS ' Logged Out ' PLUS '-' MULTIPLY 1)
+	RETURN CALL FUNCTION starting_program()
+ENDFUNCTION
+
+
+CALL FUNCTION starting_program()
+
+
+
+PROGRAM Validations
+
+
+
+
+DEFINE FUNCTION isNameValid(name)
+
+	DECLARE name AS STRING
+	REMOVE LEADING AND TRAILING BLANKS FROM name
+
+	IF NOT CALL FUNCTION any(characters IS alphabet FOR characters IN name) OR LENGTH OF THE name IS LESS THAN 6 THEN
+		PRINT('Name must follow IC.')
+		RETURN FALSE
+		
+	ELSEIF CALL FUNCTION any(characters IS digits FOR characters IN name) THEN
+			PRINT('Name cannot contain numbers.')
+			RETURN FALSE
+
+		RETURN TRUE
+	ENDIF
+	
+END FUNCTION
+
+DEFINE FUNCTION isIcValid(ic)
+
+	DECLARE ic AS NUMBER
+	IF LENGTH OF ic IS LESS THAN 12 OR IF LENGTH OF ic IS MORE THAN 12 THEN
+		RETURN FALSE
+	ENDIF
+	IF ic IS NOT digits THEN
+		RETURN FALSE
+
+	RETURN TRUE
+	ENDIF
+	
+END FUNCTION
+
+DEFINE FUNCTION isPhoneValid(phone)
+
+	DECLARE phone AS NUMBER
+	REPLACE "-"TO " " FROM phone AND REPLACE "  " TO " " FROM phone
+	IF LENGTH OF phone IS LESS THAN 11 OR IF LENGTH OF phone IS MORE THAN 12 THEN
+		RETURN FALSE
+	ENDIF
+	IF phone IS NOT digits THEN
+		RETURN FALSE
+
+	RETURN TRUE
+	ENDIF
+	
+END FUNCTION
+
+DEFINE FUNCTION isDobValid(date_of_birth)
+
+	DECLARE date_of_birth AS STRING
+	IF LENGTH OF date_of_birth IS LESS THAN 10 OR IF LENGTH OF date_of_birth IS MORE THAN 10 THEN
+		RETURN FALSE
+
+	RETURN TRUE
+	ENDIF
+	
+END FUNCTION
+
+DEFINE FUNCTION isCoBValid(cityOfBirth)
+
+	DECLARE cityOfBirth AS STRING	
+	FOR character IN cityOfBirth
+		IF character IS digits THEN
+			RETURN FALSE
+
+		ELSEIF character IS NOT alphabet THEN
+				RETURN FALSE
+
+			RETURN TRUE
+		ENDIF
+	ENDFOR
+	
+END FUNCTION
+
+DEFINE FUNCTION isWorkHistoryValid(workHistory)
+
+	DECLARE workHistory AS STRING
+	FOR character IN workHistory
+		IF character IS digits THEN
+			RETURN FALSE
+		ENDIF
+
+		IF character IS EQUALS TO '' THEN
+			RETURN "None"
+		
+		RETURN TRUE
+		ENDIF
+	ENDFOR
+
+END FUNCTION
+
+DEFINE FUNCTION isCurrentWorkValid(currentWork)
+
+	DECLARE currentWork AS STRING
+	FOR character IN currentWork
+		IF character IS digits THEN
+			RETURN FALSE
+		
+		RETURN TRUE
+		ENDIF
+	ENDFOR
+
+END FUNCTION
+
+DEFINE FUNCTION isDoaValid(dateOfAcquisition)
+
+	DECLARE dateOfAcquisition AS STRING
+
+	IF LENGTH OF dateOfAcquisition IS LESS THAN 10 OR IF LENGTH OF dateOfAcquisition IS MORE THAN 10 THEN
+		RETURN FALSE
+
+	RETURN TRUE
+	ENDIF
+
+END FUNCTION
+
+DEFINE FUNCTION isSqFootValid(sqFoot)
+
+	DECLARE sqFoot AS STRING
+	REMOVE LEADING AND TRAILING BLANKS FROM sqFoot USING ' sf'.REMOVE LEADING AND TRAILING BLANKS FROM sqFoot
+	IF LENGTH OF sqFoot IS LESS THAN 3 THEN
+		RETURN FALSE
+	ENDIF
+
+	IF LENGTH OF sqFoot IS MORE THAN 250 THEN
+		RETURN FALSE
+	ENDIF
+
+	FOR character IN sqFoot
+		IF character IS NOT digits THEN
+			RETURN FALSE
+		
+		RETURN TRUE
+		ENDIF
+	ENDFOR
+
+END FUNCTION
+
+DEFINE FUNCTION isRentValid(rent)
+
+	DECLARE rent AS NUMBER
+	IF LENGTH OF rent IS LESS THAN OR EQUALS TO 3 THEN
+		PRINT('Minimum 1k is required...')
+		RETURN FALSE
+
+	ELSEIF NOT CALL FUNCTION any(char IS digits FOR char IN rent) THEN
+		PRINT('Only Numbers...')
+		RETURN FALSE
+	
+	RETURN TRUE
+	ENDIF
+
+END FUNCTION
+
+
+DEFINE FUNCTION textInput(prompt, dataValidation)
+
+	DECLARE value AS STRING
+	IF value IS SUCCESSFUL THEN
+		PRINT(prompt)
+		GET value
+		IF IS NOT dataValidation(value) THEN
+			RETURN CALL FUNCTION textInput(prompt, dataValidation)
+		RETURN value
+		ENDIF
+
+	ELSE THEN
+		PRINT "Error"
+		RETURN ValueError
+	ENDIF
+
+END FUNCTION
+
+
+
+
+
+PROGRAM options
+
+
+
+
+FROM validations IMPORT
+
+
+DEFINE FUNCTION writeTenant()
+
